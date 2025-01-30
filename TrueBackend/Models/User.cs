@@ -12,14 +12,11 @@ namespace Backend.Models
         public string Nickname { get; set; }
         [Required(ErrorMessage = "A password is required")]
         public string Password { get; set; }
-        [Required]
-        public bool LoggedIn { get; set; } = false;
-        [Required(ErrorMessage = "An email address is required")]
+        public bool? LoggedIn { get; set; } = false;
         [EmailAddress(ErrorMessage = "Invalid Email Address")]
-        public string Email { get; set; }
+        public string? Email { get; set; }
 
-        [Required]
-        public bool IsAdmin { get; set; } = false;
+        public bool? IsAdmin { get; set; } = false;
 
         public string? TwoFactorCode { get; set; }
         public DateTime? TwoFactorExpiry { get; set; }

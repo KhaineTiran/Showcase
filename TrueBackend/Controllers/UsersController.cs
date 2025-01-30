@@ -4,6 +4,7 @@ using Backend.Context;
 using Backend.Models;
 using System.Net.Mail;
 using System.Net;
+using System;
 
 namespace Backend.Controllers
 {
@@ -49,7 +50,7 @@ namespace Backend.Controllers
             return CreatedAtAction("GetUser", new { id = user.Id }, user);
         }
 
- 
+
         private bool UserExists(int id)
         {
             return _context.Users.Any(e => e.Id == id);
@@ -57,17 +58,43 @@ namespace Backend.Controllers
 
         //log in a user
         [HttpPost("login")]
-        public async Task<ActionResult<User>> Login(User user)
+        public async Task<IActionResult> Login([FromBody] User user)
         {
             var userInDb = await _context.Users.FirstOrDefaultAsync(u => u.Nickname == user.Nickname && u.Password == user.Password);
             if (userInDb == null)
             {
-                return NotFound();
+                return NotFound(new { message = "Invalid login credentials" });
             }
+
+            // Generate and send a 2FA code
+            await SendSecurityEmail(userInDb);
+            return Ok(new { message = "2FA required", userId = userInDb.Id });
+        }
+        [HttpPost("verify-otp")]
+        public async Task<IActionResult> VerifyOtp([FromBody] OtpVerificationRequest request)
+        {
+            var userInDb = await _context.Users.FirstOrDefaultAsync(u => u.Id == request.UserId);
+
+            if (userInDb == null)
+            {
+                return BadRequest(new { message = "User does not exist" });
+            }
+            if (userInDb.TwoFactorCode != request.Otp)
+            {
+                return BadRequest(new { message = "Invalid OTP" });
+            }
+                if (userInDb.TwoFactorExpiry < DateTime.Now)
+            {
+                return BadRequest(new { message = "OTP expired" });
+            }
+
+            // Log the user in
             userInDb.LoggedIn = true;
             await _context.SaveChangesAsync();
-            return userInDb;
+            return Ok(new { message = "Login successful", userInDb.IsAdmin }); 
         }
+
+
         // Log out a user
         [HttpPost("logout")]
         public async Task<ActionResult<User>> Logout([FromBody] int id)
@@ -82,55 +109,46 @@ namespace Backend.Controllers
             await _context.SaveChangesAsync();
             return userInDb; // Return the updated user data
         }
-        private readonly string _smtpServer = "smtp.mailtrap.io";
-        private readonly int _smtpPort = 2525;
-        private readonly string _smtpUsername = "d75c3a739b7705";
-        private readonly string _smtpPassword = "36d4db722e8b95";
-        private readonly string _fromEmail = "MarcBoerdijk@example.com";
-        private readonly string _toEmail = "to@example.com";
-        //TODO: Implement the SendSecurityEmail method
-        public async Task SendSecurityEmail(User user)
+
+        private async Task SendSecurityEmail(User userInDb)
         {
-            //get email from database
+            if (string.IsNullOrEmpty(userInDb.Email))
+            {
+                throw new ArgumentException("No email address has been set.");
+            }
             try
             {
+                string _smtpServer = "smtp.mailtrap.io";
+                int _smtpPort = 2525;
+                string _smtpUsername = "d75c3a739b7705";
+                string _smtpPassword = "36d4db722e8b95";
+                string _fromEmail = "MarcBoerdijk@example.com";
+
                 using (var client = new SmtpClient(_smtpServer, _smtpPort))
                 {
                     client.EnableSsl = true;
                     client.Credentials = new NetworkCredential(_smtpUsername, _smtpPassword);
-                    Random random = new Random();
-                    int[] codeArray = new int[6];
-                    for (int i = 0; i < 6; i++)
+                    //Generate the code 
+                    var rng = new Random();
+                    var code = string.Concat(Enumerable.Range(0, 6).Select(_ => rng.Next(0, 10)));
+                    string emailBody = $"Your security code is:\n\n{code}";
+
+                    using (var mailMessage = new MailMessage(_fromEmail, userInDb.Email, "Security Code", emailBody))
                     {
-                        codeArray[i] = random.Next(0, 10);
+                        client.Send(mailMessage);
                     }
-                    string code = string.Join("", codeArray);
-                    string emailBody = $"Your Security code is as follows:\n\n{code}";
 
-                    var mailMessage = new MailMessage(_fromEmail, user.Email, "Security Code", emailBody);
-                    client.Send(mailMessage);
-
-                    user.TwoFactorCode = code;
-                    user.TwoFactorExpiry = DateTime.Now.AddMinutes(5);
+                    // Save OTP to user record
+                    userInDb.TwoFactorCode = code;
+                    userInDb.TwoFactorExpiry = DateTime.Now.AddMinutes(15);
+                    _context.Users.Update(userInDb);
                     await _context.SaveChangesAsync();
-                    //Save the security code and expiry time to the database
-                }
+                }   
             }
             catch (Exception ex)
             {
-                // Handle exception (log it, rethrow it, etc.)
                 throw new InvalidOperationException("Failed to send email", ex);
             }
         }
-        //TODO: Implement the VerifySecurityCode method
-        public async Task<ActionResult<User>> VerifySecurityCode(User user)
-        {
-            var userInDb = await _context.Users.FirstOrDefaultAsync(u => u.Email == user.Email && u.TwoFactorCode == user.TwoFactorCode && u.TwoFactorExpiry > DateTime.Now);
-            if (userInDb == null)
-            {
-                return NotFound();
-            }
-            return userInDb;
-        }
-    )
+    }
 }

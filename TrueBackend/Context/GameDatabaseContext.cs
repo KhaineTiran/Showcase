@@ -26,7 +26,7 @@ namespace Backend.Context
                     Nickname = "admin",
                     Password = "test", 
                     IsAdmin = true,
-                    Email = "marcboerdijk@gmail.com"
+                    Email = "marcboerdijk@hotmmail.com"
                 },
                 new User
                 {
